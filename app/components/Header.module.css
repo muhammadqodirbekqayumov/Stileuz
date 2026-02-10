@@ -1,0 +1,58 @@
+.header {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    padding: 30px 40px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    z-index: 100;
+    background: rgba(5, 5, 5, 0.9);
+    /* Deep Black Glass */
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid rgba(191, 149, 63, 0.1);
+    transition: all 0.3s ease;
+}
+
+.logo {
+    font-family: var(--font-serif);
+    font-size: 28px;
+    font-weight: 500;
+    letter-spacing: -0.02em;
+    color: black;
+    text-transform: uppercase;
+}
+
+.nav {
+    display: flex;
+    align-items: center;
+    gap: 40px;
+}
+
+.link {
+    background: transparent;
+    border: none;
+    color: #666;
+    font-size: 14px;
+    font-weight: 400;
+    cursor: pointer;
+    transition: color 0.2s;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.link:hover {
+    color: black;
+}
+
+/* Mobile Responsiveness */
+@media (max-width: 768px) {
+    .header {
+        padding: 20px;
+    }
+
+    .link {
+        display: none;
+    }
+}
