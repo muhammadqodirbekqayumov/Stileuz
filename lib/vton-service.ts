@@ -6,10 +6,11 @@ export interface VtonInput {
     category: string;
     description?: string;
     brandId?: string;
+    webhook?: string;
 }
 
 export async function startVton(input: VtonInput) {
-    const { humanImage, garmentImage, category, description = "clothing" } = input;
+    const { humanImage, garmentImage, category, description = "clothing", webhook } = input;
 
     // Use the same enhanced prompt logic as the API
     let finalPrompt = `${description}, raw photo, masterpiece, realistic texture, 8k, photorealistic, shot on dslr, fujifilm, natural lighting, correct anatomy, proportional body, maintain height, perfect fit, natural drape, crisp fabric, unwrinkled, maintain original garment details, exact texture match`;
@@ -18,7 +19,7 @@ export async function startVton(input: VtonInput) {
         finalPrompt += ", fashion stylist recommendation, complementary colors, cohesive luxury look, matching material";
     }
 
-    return await replicate.predictions.create({
+    const options: any = {
         version: "0513734a452173b8173e907e3a59d19a36266e55b48528559432bd21c7d7e985",
         input: {
             human_img: humanImage,
@@ -30,7 +31,14 @@ export async function startVton(input: VtonInput) {
             force_dc: true,
             negative_prompt: "cartoon, anime, illustration, painting, 3d render, plastic, fake, bad texture, squashed body, compressed height, distorted proportions, short legs, ugly, blurry",
         },
-    });
+    };
+
+    if (webhook) {
+        options.webhook = webhook;
+        options.webhook_events_filter = ["completed"];
+    }
+
+    return await replicate.predictions.create(options);
 }
 
 export async function pollPrediction(id: string) {
