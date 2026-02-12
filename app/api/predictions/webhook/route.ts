@@ -1,60 +1,31 @@
-import { NextRequest, NextResponse } from "next/server";
-import { Bot } from "grammy";
+import { NextResponse } from "next/server";
+import { supabase } from "@/lib/supabase";
 
-const token = process.env.TELEGRAM_BOT_TOKEN;
-
-export async function POST(req: NextRequest) {
-    if (!token) return NextResponse.json({ error: "No bot token" }, { status: 500 });
-
-    const { searchParams } = new URL(req.url);
-    const chatId = searchParams.get("chatId");
-
-    if (!chatId) return NextResponse.json({ error: "No chatId" }, { status: 400 });
-
+export async function POST(request: Request) {
     try {
-        const body = await req.json();
-        console.log("Replicate Webhook received for chat:", chatId, body.status);
+        const body = await request.json();
+        const { id, status, output, error } = body;
 
-        if (body.status === "succeeded") {
-            const bot = new Bot(token);
-            const aiResult = Array.isArray(body.output) ? body.output[0] : body.output;
+        console.log(`Webhook received for prediction ${id}: ${status}`);
 
-            // 1. APPLY WATERMARK
-            let finalImage = aiResult;
-            try {
-                const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://stileuz.vercel.app";
-                const watermarkRes = await fetch(`${siteUrl}/api/predictions/process`, {
-                    method: "POST",
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        imageUrl: aiResult,
-                        logoUrl: `${siteUrl}/brands/adamari-logo.png`
-                    })
-                });
-                const wData = await watermarkRes.json();
-                if (wData.watermarkedImage) finalImage = wData.watermarkedImage;
-            } catch (e) {
-                console.error("Watermark failed in webhook:", e);
-            }
-
-            // 2. SEND TO TELEGRAM
-            await bot.api.sendPhoto(chatId, finalImage, {
-                caption: "Tayyor! Adamari kiyimi sizga juda yarashdi. 😍\n\nSotib olish uchun: @adamaricommunitymanager",
-                reply_markup: {
-                    inline_keyboard: [[
-                        { text: "🛒 Sotib olish", url: "https://t.me/adamaricommunitymanager" },
-                        { text: "🔄 Boshqasini ko'rish", callback_data: "reset" }
-                    ]]
-                }
-            });
-        } else if (body.status === "failed") {
-            const bot = new Bot(token);
-            await bot.api.sendMessage(chatId, "Kechirasiz, rasm tayyorlashda xatolik yuz berdi. Iltimos, boshqa rasm bilan urinib ko'ring.");
+        if (error) {
+            console.error("Prediction failed:", error);
+            // Update functionality to handle error state in DB if you are storing predictions there
+            return NextResponse.json({ received: true }, { status: 200 });
         }
 
-        return NextResponse.json({ status: "ok" });
-    } catch (error) {
-        console.error("Webhook Error:", error);
-        return NextResponse.json({ error: "Internal Error" }, { status: 500 });
+        if (status === "succeeded") {
+            const outputUrl = output; // IDM-VTON usually returns a single URL string or array
+            console.log("Generated Image URL:", outputUrl);
+
+            // TODO: Here you can update your database if you track prediction IDs.
+            // For now, we are just logging it, as the frontend might be polling Replicate directly
+            // or using the prediction ID to fetch status.
+        }
+
+        return NextResponse.json({ received: true }, { status: 200 });
+    } catch (err) {
+        console.error("Webhook Error:", err);
+        return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
     }
 }

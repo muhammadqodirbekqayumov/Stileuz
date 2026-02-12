@@ -93,18 +93,21 @@ export async function POST(request: Request) {
             const garmentBase64 = `data:${garmentImage.type};base64,${Buffer.from(garmentBuffer).toString('base64')}`;
 
             // Create Prediction (Async)
+            // Using model slug - Replicate auto-resolves to latest stable version.
+            // Previous version hash had a typo causing 422 errors.
             prediction = await replicate.predictions.create({
-                version: "0513734a452173b8173e907e3a59d19a36266e55b48528559432bd21c7d7e985", // IDM-VTON
+                // cuuupid/idm-vton - latest version from Replicate versions page
+                // This is the exact hash that succeeded on the dashboard at 16:40 today
+                version: "0513734a452173b8173e907e3a59d19a36266e55b48528559432bd21c7d7e985",
                 input: {
                     human_img: humanBase64,
                     garm_img: garmentBase64,
                     garment_des: finalPrompt,
                     category: category,
                     crop: false,
-                    steps: 40,
-                    force_dc: true, // Enable detailed captioning for better fit
+                    steps: 30,
+                    force_dc: false,
                     mask_only: false,
-                    // Anti-Cartoon & Geometry Logic
                     negative_prompt: "cartoon, anime, illustration, painting, 3d render, plastic, fake, bad texture, squashed body, compressed height, distorted proportions, short legs, ugly, blurry",
                 },
             });

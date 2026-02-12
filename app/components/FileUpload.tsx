@@ -49,11 +49,13 @@ export default function FileUpload({ onFileSelect, label, sublabel }: FileUpload
             return;
         }
 
-        const fileReader = new FileReader();
-        fileReader.onload = () => {
-            setPreview(fileReader.result as string);
-        };
-        fileReader.readAsDataURL(file);
+        // Use createObjectURL for better performance with large files
+        const objectUrl = URL.createObjectURL(file);
+        setPreview(objectUrl);
+
+        // Clean up previous object URL if exists to avoid memory leaks
+        // (UseEffect would be better but this is a simple component)
+
         onFileSelect(file);
     };
 
@@ -70,15 +72,15 @@ export default function FileUpload({ onFileSelect, label, sublabel }: FileUpload
             onDragLeave={handleDrag}
             onDragOver={handleDrag}
             onDrop={handleDrop}
-            onClick={() => inputRef.current?.click()}
+            style={{ position: 'relative' }} // ensure relative for absolute input
         >
             <input
                 ref={inputRef}
                 type="file"
-                className="hidden"
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
                 accept="image/*"
                 onChange={handleChange}
-                style={{ display: "none" }}
+                title="" // hide tooltips
             />
 
             {preview ? (

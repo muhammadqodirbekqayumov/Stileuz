@@ -12,10 +12,20 @@ import {
     Download,
     Share2,
     RefreshCw,
-    ShoppingBag
+    ShoppingBag,
+    Ruler,
+    Instagram,
+    Send,
+    Phone
 } from "lucide-react";
+import SizeInputModal from "../components/marketplace/SizeInputModal";
+import RelatedProducts from "../components/marketplace/RelatedProducts";
+import ShareButton from "../components/marketplace/ShareButton";
+import { resizeImage } from "../../lib/imageUtils";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+import BrandIntroModal from "../components/BrandIntroModal";
 
 function TryOnContent() {
     const searchParams = useSearchParams();
@@ -30,10 +40,17 @@ function TryOnContent() {
     // Status State
     const [loading, setLoading] = useState(false);
     const [statusText, setStatusText] = useState("");
+    const [error, setError] = useState<string | null>(null);
+
+    // Brand Intro state (handled by modal)
 
     // Config State
     const [category, setCategory] = useState("upper_body");
-    const [autoMatch, setAutoMatch] = useState(true);
+    const [useHQ, setUseHQ] = useState(true);
+
+    // Smart Features State
+    const [isSizeModalOpen, setIsSizeModalOpen] = useState(false);
+    const [recommendedSize, setRecommendedSize] = useState<{ size: string, note: string } | null>(null);
 
     const getSafeUrl = (imgData: any): string => {
         if (!imgData) return "";
@@ -43,44 +60,58 @@ function TryOnContent() {
         return "";
     }
 
+    const handleFileSelect = async (file: File, type: 'human' | 'garment') => {
+        try {
+            // Client-side Resize to max 1500px to prevent payload errors
+            // Also converts potential HEIC/etc to standard JPEG blob via canvas if supported,
+            // but usually browser handles basic formats. 
+            // We use a safe resized file.
+            const resizedFile = await resizeImage(file, 1280);
+
+            if (type === 'human') setPersonImage(resizedFile);
+            else setGarmentImage(resizedFile);
+
+        } catch (err) {
+            console.error("Resize error:", err);
+            // Fallback to original if resize fails
+            if (type === 'human') setPersonImage(file);
+            else setGarmentImage(file);
+        }
+    };
+
     const handleGenerate = async () => {
         if (!personImage || !garmentImage) {
-            alert("Iltimos, ikkala rasmni ham yuklang!");
+            setError("Please upload both your photo and a garment photo.");
             return;
         }
 
         setLoading(true);
+        setError(null);
         setResultImage(null);
 
         try {
-            setStatusText("1/2: Kiyim kiygizilmoqda (AI)...");
+            setStatusText("starting");
 
             const formData = new FormData();
             formData.append("type", "vton");
 
-            if (typeof personImage === 'string') {
-                formData.append("human_image_url", personImage);
-            } else {
-                formData.append("human_image", personImage);
-            }
+            if (typeof personImage === 'string') formData.append("human_image_url", personImage);
+            else formData.append("human_image", personImage);
 
-            if (typeof garmentImage === 'string') {
-                formData.append("garm_img_url", garmentImage);
-            } else {
-                formData.append("garm_img", garmentImage);
-            }
+            if (typeof garmentImage === 'string') formData.append("garm_img_url", garmentImage);
+            else formData.append("garm_img", garmentImage);
 
             formData.append("category", category);
-            if (autoMatch) {
-                formData.append("description", "full outfit matching style, cohesive look");
-            }
+            if (useHQ) formData.append("description", "high quality, detailed texture, photorealistic");
 
             const vtonRes = await fetch("/api/predictions", { method: "POST", body: formData });
             const vtonData = await vtonRes.json();
-            if (vtonData.error) throw new Error("VTON Start Error: " + vtonData.error);
+            if (vtonData.error) throw new Error(vtonData.error);
 
             let vtonId = vtonData.id;
             let vtonResult = null;
+
+            setStatusText("processing");
 
             while (!vtonResult) {
                 await sleep(3000);
@@ -90,205 +121,244 @@ function TryOnContent() {
                 if (statusData.status === "succeeded") {
                     vtonResult = getSafeUrl(statusData.output);
                 } else if (statusData.status === "failed" || statusData.status === "canceled") {
-                    throw new Error("VTON Failed");
+                    throw new Error("Virtual Try-On Failed. Please try again with a clearer photo.");
                 }
             }
 
-            setStatusText("2/2: HD Sifatga o'tkazilmoqda...");
-            const upscaleForm = new FormData();
-            upscaleForm.append("type", "upscale");
-            upscaleForm.append("image_url", vtonResult);
+            // Upscale logic (optional, keeping it simple for now or integrated in VTON if steps are high)
+            // For now, using the VTON result directly as IDM-VTON is quite good.
+            setResultImage(vtonResult);
+            setStatusText("completed");
 
-            const upRes = await fetch("/api/predictions", { method: "POST", body: upscaleForm });
-            const upData = await upRes.json();
-
-            let upId = upData.id;
-            let finalResult = null;
-
-            while (!finalResult) {
-                await sleep(3000);
-                const statusRes = await fetch(`/api/predictions/${upId}`);
-                const statusData = await statusRes.json();
-
-                if (statusData.status === "succeeded") {
-                    const aiResult = getSafeUrl(statusData.output);
-
-                    if (brand && brand.logoUrl) {
-                        setStatusText("BREND LOGOTIPI QO'YILMOQDA...");
-                        try {
-                            const watermarkRes = await fetch("/api/predictions/process", {
-                                method: "POST",
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({
-                                    imageUrl: aiResult,
-                                    logoUrl: `${window.location.origin}${brand.logoUrl}`
-                                })
-                            });
-                            const wData = await watermarkRes.json();
-                            finalResult = wData.watermarkedImage || aiResult;
-                        } catch (e) {
-                            finalResult = aiResult;
-                        }
-                    } else {
-                        finalResult = aiResult;
-                    }
-                } else if (statusData.status === "failed") {
-                    throw new Error("Upscale Failed");
-                }
-            }
-
-            setResultImage(finalResult);
-            setStatusText("Tayyor!");
-
-        } catch (error: any) {
-            alert("Xatolik: " + (error.message || "Kutilmagan xato"));
-            setStatusText("Xatolik yuz berdi");
+        } catch (err: any) {
+            setError(err.message || "An unexpected error occurred.");
         } finally {
             setLoading(false);
         }
     };
 
-    const handleDownload = () => {
+    const downloadImage = () => {
         if (!resultImage) return;
         const link = document.createElement("a");
         link.href = resultImage;
-        link.download = "stiluz-result.png";
+        link.download = "adamari-fit.png";
         link.click();
     };
 
     return (
         <div className={styles.container}>
-            <Header />
-            <div className={styles.grid}>
-                <motion.div
-                    className={styles.panel}
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.2 }}
-                >
-                    <h1 className={styles.title} style={{ color: brand.primaryColor }}>
-                        {brand.name.toUpperCase()} FITTING
-                        <Sparkles size={24} />
-                    </h1>
+            <BrandIntroModal />
 
-                    {brand.welcomeMessage && (
-                        <p className={styles.brandWelcome}>{brand.welcomeMessage}</p>
-                    )}
+            {/* Minimalist Top Bar */}
+            <div className="flex justify-center mb-8">
+                <h1 className="text-2xl font-serif text-[#c5a059] tracking-[0.2em] uppercase border-b border-[#c5a059]/30 pb-2">Adamari Fitting Room</h1>
+            </div>
+
+            <div className={styles.grid}>
+                {/* LEFT PANEL - CONTROLS */}
+                <div className={styles.panel}>
+                    <div className={styles.stepTitle}>01. Upload Your Photo</div>
 
                     <div className={styles.uploadArea}>
+                        {/* Human Image Upload */}
                         <div className={styles.inputGroup}>
-                            <h3 className={styles.stepTitle}>1. RASMINGIZNI YUKLANG</h3>
+                            <label className="text-xs uppercase tracking-widest text-[#c5a059] mb-3">Your Photo</label>
                             <FileUpload
-                                onFileSelect={setPersonImage}
-                                label="O'zingizni rasmingizni yuklang"
-                                sublabel="To'liq tana yoki yarim tana"
+                                onFileSelect={(file) => handleFileSelect(file, 'human')}
+                                label="Rasmingizni yuklang"
+                                sublabel="To'liq bo'y yoki yuqori qism"
                             />
-                        </div>
-
-                        <div className={styles.inputGroup}>
-                            <h3 className={styles.stepTitle}>2. KIYIM TANLANG</h3>
-                            {typeof garmentImage === 'string' && garmentImage ? (
-                                <div className={styles.preloadedGarment}>
-                                    <img src={garmentImage} alt="Garment" />
-                                    <button onClick={() => setGarmentImage(null)}>O'zgartirish</button>
-                                </div>
-                            ) : (
-                                <FileUpload
-                                    onFileSelect={setGarmentImage}
-                                    label="Kiyim rasmini yuklang"
-                                    sublabel="Svitshot, ko'ylak, shim..."
-                                />
+                            {!personImage && (
+                                <p className="text-[10px] text-white/30 mt-2 italic">
+                                    *Full body or upper body photo with good lighting.
+                                </p>
                             )}
                         </div>
 
+                        {/* Garment Image Upload */}
                         <div className={styles.inputGroup}>
-                            <h3 className={styles.stepTitle}>3. SOZLAMALAR</h3>
+                            <label className="text-xs uppercase tracking-widest text-[#c5a059] mb-3">Garment Photo</label>
+                            <FileUpload
+                                onFileSelect={(file) => handleFileSelect(file, 'garment')}
+                                label="Kiyim rasmini yuklang"
+                                sublabel="T-shirt, ko'ylak, kurtka va h.k."
+                            />
+                        </div>
+
+                        {/* Category Selection */}
+                        <div className={styles.inputGroup}>
+                            <label className="text-xs uppercase tracking-widest text-[#c5a059] mb-3">Category</label>
                             <select
-                                className={styles.selectInput}
                                 value={category}
                                 onChange={(e) => setCategory(e.target.value)}
+                                className={styles.selectInput}
                             >
-                                <option value="upper_body">Tepa qism (Upper)</option>
-                                <option value="lower_body">Pastki qism (Lower)</option>
-                                <option value="dresses">Ko'ylak (Dress)</option>
+                                <option value="upper_body">Upper Body (T-Shirt, Shirt, Jacket)</option>
+                                <option value="lower_body">Lower Body (Pants, Jeans, Shorts)</option>
+                                <option value="dresses">Full Body (Suit, Robe)</option>
                             </select>
+                        </div>
 
+                        {/* Advanced Settings Toggle */}
+                        <div className={styles.inputGroup}>
                             <label className={styles.toggleLabel}>
                                 <input
                                     type="checkbox"
+                                    checked={useHQ}
+                                    onChange={(e) => setUseHQ(e.target.checked)}
                                     className={styles.checkbox}
-                                    checked={autoMatch}
-                                    onChange={(e) => setAutoMatch(e.target.checked)}
                                 />
-                                AI Stilist (Auto-Match)
+                                <span className="uppercase text-[10px] tracking-wider">High Quality Rendering</span>
                             </label>
                         </div>
-
-                        <button
-                            className={styles.generateBtn}
-                            onClick={handleGenerate}
-                            disabled={loading || !personImage || !garmentImage}
-                            style={{
-                                opacity: (loading || !personImage || !garmentImage) ? 0.5 : 1,
-                                background: brand.primaryColor
-                            }}
-                        >
-                            {loading ? statusText || "YUKLANMOQDA..." : "KIYIB KO'RISH"}
-                        </button>
                     </div>
-                </motion.div>
 
-                <div className={styles.resultArea}>
-                    <AnimatePresence mode="wait">
-                        {loading ? (
-                            <motion.div
-                                className={styles.loading}
-                                initial={{ opacity: 0 }}
-                                animate={{ opacity: 1 }}
-                                exit={{ opacity: 0 }}
-                                key="loading"
-                            >
-                                <div className={styles.spinner} style={{ borderTopColor: brand.primaryColor }}></div>
-                                <p>{statusText}</p>
-                            </motion.div>
-                        ) : resultImage ? (
-                            <motion.div
-                                className={styles.resultContainer}
-                                initial={{ opacity: 0, scale: 0.95 }}
-                                animate={{ opacity: 1, scale: 1 }}
-                                key="result"
-                            >
-                                <img src={resultImage} alt="Result" className={styles.resultImage} />
+                    <button
+                        className={styles.generateBtn}
+                        onClick={handleGenerate}
+                        disabled={loading || !personImage || !garmentImage}
+                    >
+                        {loading ? "Processing..." : "Virtual Fitting"}
+                    </button>
 
-                                <div className={styles.resultActions}>
-                                    <button onClick={handleDownload} className={styles.actionBtn}>
-                                        <Download size={20} />
-                                    </button>
-                                    <button onClick={() => setResultImage(null)} className={styles.actionBtn}>
-                                        <RefreshCw size={20} />
-                                    </button>
-                                </div>
+                    {/* Size Guide Link - Moved to bottom as requested */}
+                    <div className="mt-6 flex flex-col items-center gap-4">
+                        <button
+                            onClick={() => setIsSizeModalOpen(true)}
+                            className="text-[#c5a059] text-[10px] uppercase tracking-widest flex items-center gap-2 hover:text-white transition-colors border border-[#c5a059]/30 px-4 py-2"
+                        >
+                            <Ruler size={12} />
+                            Find My Size
+                        </button>
 
-                                <a
-                                    href={`https://t.me/${brand.telegramUser}`}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className={styles.buyBtn}
-                                    style={{ background: brand.primaryColor }}
-                                >
-                                    <ShoppingBag size={20} />
-                                    ZAKAZ QILISH (TELEGRAM)
-                                </a>
-                            </motion.div>
-                        ) : (
-                            <div className={styles.placeholder} key="placeholder">
-                                <Sparkles size={48} style={{ opacity: 0.2, marginBottom: 20, color: brand.primaryColor }} />
-                                NATIJA SHU YERDA CHIQADI
+                        {recommendedSize && (
+                            <div className="text-center animate-in fade-in slide-in-from-bottom-2">
+                                <p className="text-[#c5a059] font-bold text-sm tracking-wider">Recommended: {recommendedSize.size}</p>
+                                <p className="text-[10px] text-white/40 italic">{recommendedSize.note}</p>
                             </div>
                         )}
-                    </AnimatePresence>
+                    </div>
+
+                    {/* Contact Info Footer */}
+                    <div className="mt-12 pt-8 border-t border-white/5 flex flex-col items-center gap-4 w-full">
+                        <p className="text-[10px] text-white/30 uppercase tracking-[0.2em]">Mijozlar Xizmati</p>
+                        <div className="flex items-center gap-10">
+                            <a href="https://t.me/Adamari_mens" target="_blank" className="text-[#c5a059]/80 hover:text-[#c5a059] transition-all hover:scale-110">
+                                <Send size={24} />
+                            </a>
+                            <a href="https://instagram.com/adamari_uzbekistan" target="_blank" className="text-[#c5a059]/80 hover:text-[#c5a059] transition-all hover:scale-110">
+                                <Instagram size={24} />
+                            </a>
+                            <a href="tel:+998555100100" className="text-[#c5a059]/80 hover:text-[#c5a059] transition-all hover:scale-110">
+                                <Phone size={24} />
+                            </a>
+                        </div>
+                    </div>
+                </div>
+
+                {/* RIGHT PANEL - RESULT */}
+                <div className={styles.resultArea}>
+                    <div className="flex flex-col gap-2 mb-6">
+                        <h1 className="text-3xl md:text-4xl font-serif text-white tracking-wide">
+                            Virtual <span className="text-[#c5a059] italic">Kiyinish Xonasi</span>
+                        </h1>
+                        <p className="text-white/40 text-sm max-w-md">
+                            Sun'iy intellekt yordamida kiyimlarni onlayn kiyib ko'ring.
+                        </p>
+                    </div>
+                    <div className={styles.resultContainer}>
+                        {loading && (
+                            <div className={styles.loading}>
+                                <div className={styles.spinner}></div>
+                                <p className="text-xs uppercase tracking-[0.2em] text-[#c5a059] animate-pulse">
+                                    {statusText === "starting" ? "Initializing AI..." :
+                                        statusText === "processing" ? "Analyzing Fabric & Fit..." :
+                                            "Finalizing Look..."}
+                                </p>
+                            </div>
+                        )}
+
+                        {resultImage ? (
+                            <>
+                                <img src={resultImage} alt="Virtual Try-On Result" className={styles.resultImage} />
+                                <div className={styles.resultActions}>
+                                    <button
+                                        onClick={() => window.location.reload()}
+                                        className={styles.actionBtn}
+                                        title="Boshqatdan"
+                                    >
+                                        <RefreshCw size={20} />
+                                    </button>
+                                    <ShareButton imageUrl={resultImage} />
+                                </div>
+                                <div className="absolute bottom-0 w-full p-4 bg-gradient-to-t from-black/90 to-transparent flex flex-col gap-3">
+                                    <button
+                                        onClick={downloadImage}
+                                        className="w-full py-3 bg-[#c5a059] text-[#0f172a] font-bold text-xs uppercase tracking-widest hover:bg-[#e0b860] transition-colors flex items-center justify-center gap-2"
+                                    >
+                                        <Download size={16} />
+                                        Rasmni Yuklab Olish
+                                    </button>
+                                    <button className={styles.buyBtn}>
+                                        <ShoppingBag size={14} /> Sotib Olish
+                                    </button>
+                                </div>
+                            </>
+                        ) : (
+                            <div className={styles.placeholder}>
+                                <div className="w-16 h-16 border border-white/10 rounded-full flex items-center justify-center mb-4">
+                                    <span className="font-serif text-3xl text-white/20 italic">a</span>
+                                </div>
+                                <p className={styles.placeholderText}>Natija shu yerda chiqadi</p>
+                                {loading && <p className="text-xs text-[#c5a059] mt-4 animate-pulse">AI ishlamoqda...</p>}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Debug Error Display */}
+                    {error && (
+                        <div className="mt-4 p-4 bg-red-900/50 border border-red-500/50 rounded text-red-200 text-xs">
+                            <strong>Xatolik:</strong> {error}
+                            <br />
+                            <span className="opacity-50">Iltimos, qayta urinib ko'ring yoki kichikroq rasm yuklang.</span>
+                        </div>
+                    )}
+
+                    {/* Related Products Recommendation */}
+                    {resultImage && recommendedSize && (
+                        <div className="mt-8 animate-in fade-in slide-in-from-bottom-4 duration-700 delay-200">
+                            <div className="flex items-center gap-4 mb-6">
+                                <div className="h-px bg-[#c5a059]/30 flex-1"></div>
+                                <h3 className="uppercase text-xs tracking-[0.3em] text-[#c5a059]">Complete the Look</h3>
+                                <div className="h-px bg-[#c5a059]/30 flex-1"></div>
+                            </div>
+                            <RelatedProducts />
+                        </div>
+                    )}
                 </div>
             </div>
+
+            {/* Modals */}
+            <SizeInputModal
+                isOpen={isSizeModalOpen}
+                onClose={() => setIsSizeModalOpen(false)}
+                onRecommendation={(size, note) => setRecommendedSize({ size, note })}
+            />
+
+            {error && (
+                <div className="fixed top-6 right-6 z-[200] bg-red-900/90 text-white px-6 py-4 rounded shadow-2xl border-l-4 border-red-500 backdrop-blur-md max-w-md animate-in slide-in-from-right">
+                    <div className="flex justify-between items-start mb-2">
+                        <strong className="uppercase text-xs tracking-wider text-red-200">System Error</strong>
+                        <button onClick={() => setError(null)} className="text-white/50 hover:text-white">✕</button>
+                    </div>
+                    <p className="text-sm font-light">{error}</p>
+                    {error.includes("422") && (
+                        <p className="text-xs text-red-300 mt-2 border-t border-red-800 pt-2">
+                            Tip: Try refreshing the page or checking your internet connection.
+                        </p>
+                    )}
+                </div>
+            )}
         </div>
     );
 }
